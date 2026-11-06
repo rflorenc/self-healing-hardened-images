@@ -1,0 +1,233 @@
+# Pipelines and triggers for the BO1122 demo. ${GITEA_INTERNAL_URL} and ${APP_IMAGE} are filled in
+# by scripts/install-pipeline.sh. In-cluster Git traffic uses the Gitea service (no TLS dependency
+# on the ingress certificate); the Gitea webhook calls the EventListener service directly.
+#
+#   base-watch       (scheduled)  new Red Hat base image?  ->  commit new digest to app repo
+#   build-and-stage  (git push)   clone, build, [Chains signs], ACS check, stage, prod pull request
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: build-and-stage
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: APP_REPO
+      default: ${GITEA_INTERNAL_URL}/cve-demo/app.git
+    - name: REVISION
+      default: main
+    - name: GITOPS_REPO
+      default: ${GITEA_INTERNAL_URL}/cve-demo/gitops.git
+    - name: APP_IMAGE
+      default: ${APP_IMAGE}
+  workspaces:
+    - name: source
+  tasks:
+    - name: clone
+      taskRef:
+        resolver: cluster
+        params:
+          - {name: kind, value: task}
+          - {name: name, value: git-clone}
+          - {name: namespace, value: openshift-pipelines}
+      params:
+        - {name: URL, value: $(params.APP_REPO)}
+        - {name: REVISION, value: $(params.REVISION)}
+      workspaces:
+        - {name: output, workspace: source}
+    - name: build
+      runAfter: [clone]
+      taskRef:
+        resolver: cluster
+        params:
+          - {name: kind, value: task}
+          - {name: name, value: buildah}
+          - {name: namespace, value: openshift-pipelines}
+      params:
+        - {name: IMAGE, value: "$(params.APP_IMAGE):$(tasks.clone.results.COMMIT)"}
+        - {name: DOCKERFILE, value: ./Containerfile}
+        # pushes to Red Hat Quay with TLS verification (credentials: robot cve-demo+pipeline on the pipeline SA)
+      workspaces:
+        - {name: source, workspace: source}
+    # Tekton Chains signs the image and records SLSA provenance when the build task succeeds.
+    - name: acs-check
+      runAfter: [build]
+      taskRef: {name: acs-image-check}
+      params:
+        - {name: IMAGE, value: "$(params.APP_IMAGE)@$(tasks.build.results.IMAGE_DIGEST)"}
+    # Conforma release policy: keyless signatures (Trusted Artifact Signer) + what the signed SLSA
+    # provenance says (built by this pipeline with the Red Hat buildah task). Runs next to the ACS check.
+    - name: conforma
+      runAfter: [build]
+      taskRef: {name: conforma-check}
+      params:
+        - {name: IMAGE, value: "$(params.APP_IMAGE)@$(tasks.build.results.IMAGE_DIGEST)"}
+    # SBOM into Trusted Profile Analyzer: Red Hat's SBOM for the exact base image digest we built on.
+    - name: sbom
+      runAfter: [build]
+      taskRef: {name: sbom-upload}
+      params:
+        - {name: IMAGE, value: "$(params.APP_IMAGE)@$(tasks.build.results.IMAGE_DIGEST)"}
+        - {name: PIPELINE_RUN, value: $(context.pipelineRun.name)}
+      workspaces:
+        - {name: source, workspace: source}
+    - name: promote
+      runAfter: [acs-check, conforma, sbom]
+      taskRef: {name: gitops-promote}
+      params:
+        - {name: GITOPS_REPO, value: $(params.GITOPS_REPO)}
+        - {name: GITEA_API, value: "${GITEA_INTERNAL_URL}/api/v1/repos/cve-demo/gitops"}
+        - {name: IMAGE_DIGEST, value: $(tasks.build.results.IMAGE_DIGEST)}
+        - {name: SOURCE_COMMIT, value: $(tasks.clone.results.COMMIT)}
+        - {name: SCAN_SUMMARY, value: $(tasks.acs-check.results.SUMMARY)}
+        - {name: POLICY_SUMMARY, value: $(tasks.conforma.results.SUMMARY)}
+        - {name: SBOM_SUMMARY, value: $(tasks.sbom.results.SUMMARY)}
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: base-watch
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: APP_REPO
+      default: ${GITEA_INTERNAL_URL}/cve-demo/app.git
+    - name: BASE_REPO          # from .env (BASE_REPO, BASE_STREAM), filled in by install-pipeline.sh
+      default: ${BASE_REPO}
+    - name: BASE_STREAM
+      default: "${BASE_STREAM}"
+  tasks:
+    - name: bump
+      taskRef: {name: bump-base-image}
+      params:
+        - {name: APP_REPO, value: $(params.APP_REPO)}
+        - {name: BASE_REPO, value: $(params.BASE_REPO)}
+        - {name: BASE_STREAM, value: $(params.BASE_STREAM)}
+---
+# ---------------------------------------------------------------- trigger: push to app main
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cve-demo-triggers
+  namespace: cve-demo-ci
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cve-demo-triggers
+  namespace: cve-demo-ci
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: tekton-triggers-eventlistener-roles}
+subjects: [{kind: ServiceAccount, name: cve-demo-triggers, namespace: cve-demo-ci}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cve-demo-triggers
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: tekton-triggers-eventlistener-clusterroles}
+subjects: [{kind: ServiceAccount, name: cve-demo-triggers, namespace: cve-demo-ci}]
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: build-and-stage
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: revision
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: build-and-stage-
+      spec:
+        pipelineRef: {name: build-and-stage}
+        params:
+          - {name: REVISION, value: $(tt.params.revision)}
+        taskRunTemplate:
+          serviceAccountName: pipeline
+        workspaces:
+          - name: source
+            volumeClaimTemplate:
+              spec:
+                accessModes: [ReadWriteOnce]
+                resources: {requests: {storage: 1Gi}}
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: app-push
+  namespace: cve-demo-ci
+spec:
+  serviceAccountName: cve-demo-triggers
+  triggers:
+    - name: app-main
+      interceptors:
+        - ref: {name: cel}
+          params:
+            - name: filter
+              # [skip ci] in the commit message: no build (used by scripts/reset.sh)
+              value: >-
+                body.ref == 'refs/heads/main' && body.repository.name == 'app' &&
+                !body.head_commit.message.contains('[skip ci]')
+      bindings:
+        - {name: revision, value: $(body.after)}
+      template: {ref: build-and-stage}
+---
+# ---------------------------------------------------------------- schedule: base-watch
+# Suspended so the demo controls when "the advisory arrives"; set suspend: false for real use.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: base-watch-scheduler
+  namespace: cve-demo-ci
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: start-pipelines
+  namespace: cve-demo-ci
+rules:
+  - apiGroups: [tekton.dev]
+    resources: [pipelineruns]
+    verbs: [create, get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: base-watch-scheduler
+  namespace: cve-demo-ci
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: start-pipelines}
+subjects: [{kind: ServiceAccount, name: base-watch-scheduler, namespace: cve-demo-ci}]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: base-watch
+  namespace: cve-demo-ci
+spec:
+  schedule: "*/30 * * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: base-watch-scheduler
+          restartPolicy: Never
+          containers:
+            - name: start
+              image: registry.redhat.io/openshift4/ose-cli@sha256:e6b8fda5ee0718197dd45b0b384e7880abe2a08be43e8b5bae3e26a54dd989d6  # ose-cli, pinned
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  cat <<'PR' | oc create -f -
+                  apiVersion: tekton.dev/v1
+                  kind: PipelineRun
+                  metadata:
+                    generateName: base-watch-
+                    namespace: cve-demo-ci
+                  spec:
+                    pipelineRef: {name: base-watch}
+                    taskRunTemplate: {serviceAccountName: pipeline}
+                  PR

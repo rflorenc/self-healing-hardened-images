@@ -1,0 +1,23 @@
+# Values for the BO1122 catalog item. The catalog's field-content workload injects deployer.* and gitops.*.
+
+# Injected by the catalog: cluster domain and API URL.
+deployer:
+  domain: ""
+  apiUrl: ""
+
+# Injected by the catalog: where this chart lives, so child Applications can point back at it.
+gitops:
+  repoURL: ""
+  revision: main
+  path: "."
+
+argocd:
+  namespace: openshift-gitops
+  project: default
+
+# Components, deployed as child Argo CD Applications in sync-wave order. All off until each one is built
+# and tested; the bootstrap component only publishes the user information page.
+components:
+  bootstrap:
+    enabled: true
+    namespace: bo1122-catalog

@@ -1,0 +1,316 @@
+# Custom tasks for the BO1122 self-healing image demo. Shipped OpenShift Pipelines tasks
+# (git-clone, buildah) are referenced from the openshift-pipelines namespace by the pipelines.
+#
+# Secrets used (created by scripts/, never stored in git):
+#   gitea-token   token, username      Gitea API and git push
+#   acs-ci-token  token, endpoint,     ACS API token with the Continuous Integration role,
+#                 cluster, ca.pem      Central's internal endpoint, ACS cluster name, Central CA
+---
+# Fails the pipeline if the image breaks an enforced ACS build-time policy (for example the
+# demo's "fixable CVE" policy); prints the vulnerability table for the log either way.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: acs-image-check
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: IMAGE
+      description: image reference with digest (repo@sha256:...)
+  results:
+    - name: SUMMARY
+      description: 'one line, for example "ACS at build: 0 fixable Important/Critical CVEs (12 known in total)"'
+  volumes:
+    - name: acs
+      secret: {secretName: acs-ci-token, items: [{key: ca.pem, path: ca.pem}]}
+  steps:
+    - name: check
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      env:
+        - name: ROX_API_TOKEN
+          valueFrom: {secretKeyRef: {name: acs-ci-token, key: token}}
+        - name: ROX_ENDPOINT
+          valueFrom: {secretKeyRef: {name: acs-ci-token, key: endpoint}}
+        - name: ROX_CLUSTER
+          valueFrom: {secretKeyRef: {name: acs-ci-token, key: cluster}}
+        - name: ROX_CA_CERT_FILE
+          value: /acs/ca.pem
+      volumeMounts:
+        - {name: acs, mountPath: /acs, readOnly: true}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        # roxctl comes from Central itself, so its version always matches (ACS 5.0 serves only the -amd64 name)
+        curl -sSfL --cacert /acs/ca.pem -H "Authorization: Bearer $ROX_API_TOKEN" \
+          "https://$ROX_ENDPOINT/api/cli/download/roxctl-linux-amd64" -o /tmp/roxctl
+        chmod +x /tmp/roxctl
+        echo "=== Vulnerabilities in $(params.IMAGE)"
+        /tmp/roxctl image scan -e "$ROX_ENDPOINT" --image "$(params.IMAGE)" \
+          --cluster "$ROX_CLUSTER" --force --output json > /tmp/scan.json
+        python3 - "$(results.SUMMARY.path)" <<'PY'
+        import json, sys
+        vulns = json.load(open('/tmp/scan.json')).get('result', {}).get('vulnerabilities') or []
+        bad = [v for v in vulns if v.get('componentFixedVersion')
+               and v.get('cveSeverity') in ('IMPORTANT', 'CRITICAL')]
+        for v in sorted(bad, key=lambda v: v.get('cveSeverity')):
+            print(f"  {v.get('cveSeverity'):9} {v.get('cveId'):18} {v.get('componentName')} "
+                  f"{v.get('componentVersion')} -> fixed in {v.get('componentFixedVersion')}")
+        summary = (f"ACS at build: {len(bad)} fixable Important/Critical CVEs "
+                   f"({len(vulns)} known in total)")
+        print(summary)
+        open(sys.argv[1], 'w').write(summary)
+        PY
+        echo "=== Policy check"
+        /tmp/roxctl image check -e "$ROX_ENDPOINT" --image "$(params.IMAGE)" \
+          --cluster "$ROX_CLUSTER" --categories "Self-Healing Demo" --output table
+---
+# Base-watch: compares the digest of the watched base image tag with the digest pinned in the
+# app's Containerfile. If Red Hat published a new image, commits the new digest to the app
+# repository. That commit is the event that starts the rebuild (through the Gitea webhook).
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: bump-base-image
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: APP_REPO
+    - name: BASE_REPO
+      default: registry.access.redhat.com/hi/python
+    - name: BASE_STREAM
+      default: "3.11"
+  results:
+    - name: CHANGED
+      description: '"true" if a new base image was committed'
+  steps:
+    - name: latest-digest
+      image: registry.redhat.io/rhel9/skopeo@sha256:fd3d5c37f5d204af77d02e2743a10e538a9d1e8b67d8736eff86b9be4c564e1f  # rhel9/skopeo, pinned
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        skopeo inspect --override-os linux --override-arch amd64 --format '{{.Digest}}' \
+          "docker://$(params.BASE_REPO):$(params.BASE_STREAM)" | tee /tekton/home/latest
+    - name: commit-if-newer
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      env:
+        - name: GIT_TOKEN
+          valueFrom: {secretKeyRef: {name: gitea-token, key: token}}
+        - name: GIT_USER
+          valueFrom: {secretKeyRef: {name: gitea-token, key: username}}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        latest=$(cat /tekton/home/latest)
+        repo=$(echo "$(params.APP_REPO)" | sed "s#://#://$GIT_USER:$GIT_TOKEN@#")
+        git clone -q --depth 1 "$repo" /tmp/app && cd /tmp/app
+        current=$(grep -oE 'sha256:[a-f0-9]{64}' Containerfile | head -1)
+        echo "pinned: $current"; echo "latest: $latest"
+        if [ "$current" = "$latest" ]; then
+          echo "Base image is current, nothing to do."; printf false > "$(results.CHANGED.path)"; exit 0
+        fi
+        sed -i "s#$current#$latest#" Containerfile
+        git -c user.name="base-watch" -c user.email="base-watch@cve-demo.local" \
+          commit -qam "Rebuild on new base image $(params.BASE_REPO):$(params.BASE_STREAM)" \
+          -m "Red Hat published $latest (was $current)."
+        git push -q origin HEAD:main
+        echo "Committed new base image digest."; printf true > "$(results.CHANGED.path)"
+---
+# Writes the new image digest to the stage overlay on main (Argo CD syncs stage), and opens a
+# pull request against the protected prod branch (Argo CD's prod application tracks it). The
+# pipeline cannot push to prod; merging the pull request (user approver) is the one human step.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gitops-promote
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: GITOPS_REPO
+    - name: GITEA_API
+      description: e.g. http://gitea.gitea.svc:3000/api/v1/repos/cve-demo/gitops
+    - name: IMAGE_DIGEST
+    - name: SOURCE_COMMIT
+      default: unknown
+    - name: SCAN_SUMMARY
+      default: not scanned
+    - name: POLICY_SUMMARY
+      default: ""
+    - name: SBOM_SUMMARY
+      default: ""
+  results:
+    - name: PR_URL
+  steps:
+    - name: promote
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      env:
+        - name: GIT_TOKEN
+          valueFrom: {secretKeyRef: {name: gitea-token, key: token}}
+        - name: GIT_USER
+          valueFrom: {secretKeyRef: {name: gitea-token, key: username}}
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        digest="$(params.IMAGE_DIGEST)"; short=${digest#sha256:}; short=${short:0:12}
+        repo=$(echo "$(params.GITOPS_REPO)" | sed "s#://#://$GIT_USER:$GIT_TOKEN@#")
+        git clone -q "$repo" /tmp/gitops && cd /tmp/gitops
+        git config user.name "cve-demo pipeline"; git config user.email "pipeline@cve-demo.local"
+        summary="$(params.SCAN_SUMMARY)"
+        set_digest() {   # image digest and the scan result of that exact image
+          f="overlays/$1/kustomization.yaml"
+          sed -i -E "s#digest: sha256:[a-f0-9]{64}#digest: $digest#" "$f"
+          sed -i -E "s#- \"SCAN_SUMMARY=.*\"#- \"SCAN_SUMMARY=$summary\"#" "$f"
+        }
+
+        # 1. stage: straight to main, Argo CD syncs it
+        set_digest stage
+        git commit -qam "stage: app@$short (from app commit $(params.SOURCE_COMMIT))" -m "$summary" || echo "stage already at $short"
+        git push -q origin HEAD:main
+
+        # 2. prod: a pull request against the protected prod branch, for a person to approve
+        branch="promote-$short"
+        git fetch -q origin prod
+        git checkout -qb "$branch" origin/prod; set_digest prod
+        git commit -qam "prod: app@$short" -m "$summary" -m "$(params.POLICY_SUMMARY)" -m "$(params.SBOM_SUMMARY)" || { echo "prod already at $short"; printf none > "$(results.PR_URL.path)"; exit 0; }
+        git push -qf origin "$branch"
+        body=$(python3 -c "import json,sys; print(json.dumps({'title': 'Promote app@$short to production', 'head': '$branch', 'base': 'prod', 'body': 'Rebuilt, scanned and signed by the pipeline; already running in stage.\\n\\n$summary\\n$(params.POLICY_SUMMARY)\\n$(params.SBOM_SUMMARY)\\n\\nMerge to roll out to production.'}))")
+        url=$(curl -sS -u "$GIT_USER:$GIT_TOKEN" -H 'Content-Type: application/json' \
+          -X POST "$(params.GITEA_API)/pulls" -d "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('html_url','(existing pull request)'))")
+        echo "Pull request: $url"; printf '%s' "$url" > "$(results.PR_URL.path)"
+---
+# Conforma release policy check (Trusted Artifact Signer + signed SLSA provenance). Runs Conforma's
+# ec against the built image: built-in checks verify the image and attestation signatures keyless
+# (Fulcio certificate for the pipeline identity, Rekor entry, trust root from TUF); conforma/policy.yaml
+# and conforma/cve_demo.rego (ConfigMap conforma-policy) check what the provenance says.
+# Tekton Chains signs asynchronously after the build task, so the first attempts may find no
+# signature yet: the check retries for up to 2 minutes before it fails.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: conforma-check
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: IMAGE
+      description: image reference with digest (repo@sha256:...)
+    - name: CERT_IDENTITY
+      default: chains@cve-demo.local
+    - name: CERT_ISSUER
+      default: ${KC_ISSUER}
+    - name: REKOR_URL
+      default: http://rekor-server.${TAS_NS}.svc
+    - name: TUF_URL
+      default: http://tuf.${TAS_NS}.svc
+  results:
+    - name: SUMMARY
+      description: 'one line for the pull request, for example "Conforma: passed (5 of 5 checks)"'
+  steps:
+    - name: validate
+      image: registry.redhat.io/rhtas/ec-rhel9@sha256:7953bf26248b4abf0a70b10750f7634e3800cd226597521e1e5ae3b67226a261  # rhtas/ec-rhel9 0.6, pinned
+      env:
+        - {name: HOME, value: /tmp}
+        - {name: DOCKER_CONFIG, value: /docker}
+      script: |
+        #!/usr/bin/env bash
+        set -uo pipefail
+        curl -sf "$(params.TUF_URL)/1.root.json" -o /tmp/root.json
+        ec sigstore initialize --mirror "$(params.TUF_URL)" --root /tmp/root.json >/dev/null
+        for attempt in 1 2 3 4 5 6 7 8; do
+          ec validate image --image "$(params.IMAGE)" --policy /policy/policy.yaml \
+            --certificate-identity "$(params.CERT_IDENTITY)" --certificate-oidc-issuer "$(params.CERT_ISSUER)" \
+            --rekor-url "$(params.REKOR_URL)" --show-successes --info \
+            --output text --output json=/tmp/report.json --strict
+          rc=$?
+          [ "$rc" = 0 ] && break
+          grep -q 'No image signatures found\|no matching signatures\|no signatures found' /tmp/report.json 2>/dev/null || break
+          echo "--- attempt $attempt: no signature yet (Tekton Chains signs after the build), retrying in 15 s"; sleep 15
+        done
+        ok=$(jq '[.components[0].successes // [] | length] | add' /tmp/report.json 2>/dev/null || echo 0)
+        bad=$(jq '[.components[0].violations // [] | length] | add' /tmp/report.json 2>/dev/null || echo 0)
+        summary="Conforma: $([ "$rc" = 0 ] && echo passed || echo FAILED) ($ok of $((ok + bad)) checks)"
+        echo "$summary"; printf '%s' "$summary" > "$(results.SUMMARY.path)"
+        exit "$rc"
+      volumeMounts:
+        - {name: policy, mountPath: /policy}
+        - {name: docker, mountPath: /docker}
+  volumes:
+    - name: policy
+      configMap:
+        name: conforma-policy
+        items:
+          - {key: policy.yaml, path: policy.yaml}
+          - {key: cve_demo.rego, path: rego/cve_demo.rego}
+    - name: docker
+      secret: {secretName: quay-robot-pipeline, items: [{key: .dockerconfigjson, path: config.json}]}
+---
+# Software bill of materials into Red Hat Trusted Profile Analyzer. The SBOM is Red Hat's own: every
+# Red Hat Hardened Image is published with an SPDX SBOM (tag sha256-<digest>.sbom next to the image),
+# with package URLs for every RPM. The task reads the base image digest pinned in the Containerfile,
+# resolves the linux/amd64 image, fetches Red Hat's SBOM for exactly that digest and uploads it to TPA
+# as client cli (Keycloak realm tpa), labelled with our image, its digest and the pipeline run.
+# Our app adds no packages on top of the base (limitation L7), so the package list is complete; apps
+# with their own dependencies would add a generated SBOM. (ACS's roxctl image sbom has no package
+# URLs, so TPA could not match it against advisories.)
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: sbom-upload
+  namespace: cve-demo-ci
+spec:
+  params:
+    - name: IMAGE
+      description: our image reference with digest (repo@sha256:...)
+    - name: PIPELINE_RUN
+      default: unknown
+    - name: CONTAINERFILE
+      default: Containerfile
+    - name: TPA_URL
+      default: https://server.${TPA_NS}.svc
+    - name: TPA_UI
+      default: https://server-${TPA_NS}.${DOMAIN}
+    - name: TOKEN_URL
+      default: http://keycloak-service.${KC_NS}.svc:8080/realms/tpa/protocol/openid-connect/token
+  workspaces:
+    - name: source
+      description: the app checkout (for the pinned base image)
+  results:
+    - name: SUMMARY
+      description: 'one line for the pull request, for example "SBOM: 127 packages (Red Hat, base sha256:...), in Trusted Profile Analyzer <link>"'
+  steps:
+    - name: sbom
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      env:
+        - name: TPA_CLIENT_SECRET
+          valueFrom: {secretKeyRef: {name: tpa-cli-client, key: client-secret}}
+      script: |
+        #!/usr/bin/env python3
+        import json, os, re, ssl, urllib.parse, urllib.request
+        image, run = "$(params.IMAGE)", "$(params.PIPELINE_RUN)"
+        containerfile = open("$(workspaces.source.path)/$(params.CONTAINERFILE)").read()
+        base = re.search(r"^FROM\s+(\S+)@(sha256:[a-f0-9]{64})", containerfile, re.M)
+        if not base: raise SystemExit("no FROM line pinned by digest in the Containerfile")
+        ref, base_digest = base.groups()
+        host, repo = ref.split("/", 1)
+        repo = repo.rsplit(":", 1)[0]
+        def reg(path, accept):
+            req = urllib.request.Request(f"https://{host}/v2/{repo}/{path}", headers={"Accept": accept})
+            return urllib.request.urlopen(req, timeout=60).read()
+        index = json.loads(reg(f"manifests/{base_digest}", "application/vnd.oci.image.index.v1+json,"
+                               "application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json"))
+        amd64 = next((m["digest"] for m in index.get("manifests", [])
+                      if m.get("platform", {}).get("architecture") == "amd64"), base_digest)
+        sbom_manifest = json.loads(reg(f"manifests/{amd64.replace(':', '-')}.sbom", "application/vnd.oci.image.manifest.v1+json"))
+        sbom = reg(f"blobs/{sbom_manifest['layers'][0]['digest']}", "*/*")
+        packages = len(json.loads(sbom).get("packages", []))
+        body = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": "cli",
+                                       "client_secret": os.environ["TPA_CLIENT_SECRET"]}).encode()
+        token = json.load(urllib.request.urlopen("$(params.TOKEN_URL)", body, timeout=30))["access_token"]
+        labels = urllib.parse.urlencode({"labels.source": "build-and-stage", "labels.sbomBy": "Red Hat",
+            "labels.pipelineRun": run, "labels.image": image.split("@")[0], "labels.digest": image.split("@")[-1],
+            "labels.baseImage": f"{host}/{repo}", "labels.baseDigest": amd64})
+        ctx = ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt")
+        req = urllib.request.Request("$(params.TPA_URL)/api/v3/sbom?" + labels, data=sbom, method="POST",
+            headers={"Authorization": "Bearer " + token, "Content-Type": "application/octet-stream"})
+        sbom_id = json.load(urllib.request.urlopen(req, context=ctx, timeout=120)).get("id", "")
+        summary = (f"SBOM: {packages} packages (Red Hat SBOM of base {amd64[:19]}...), "
+                   f"in Trusted Profile Analyzer $(params.TPA_UI)/sboms/{sbom_id}")
+        print(summary); open("$(results.SUMMARY.path)", "w").write(summary)

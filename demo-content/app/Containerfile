@@ -1,0 +1,7 @@
+# The base image is pinned by digest. The base-watch pipeline replaces this line when
+# Red Hat publishes a new hi/python:3.11 image, and that commit starts the rebuild.
+FROM registry.access.redhat.com/hi/python:3.11@sha256:PINNED_DIGEST
+ENV BASE_IMAGE=registry.access.redhat.com/hi/python:3.11@sha256:PINNED_DIGEST
+COPY app.py /app/app.py
+EXPOSE 8080
+CMD ["python3.11", "/app/app.py"]

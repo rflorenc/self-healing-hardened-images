@@ -1,0 +1,5 @@
+apiVersion: v2
+name: bootstrap
+description: Namespace and user information page for the BO1122 catalog item
+type: application
+version: 0.1.0

@@ -1,0 +1,14 @@
+namespace: cve-demo-prod
+resources: [../../base]
+configMapGenerator:
+  - name: app-info
+    behavior: merge
+    literals:
+      - APP_ENV=prod
+      # set by the pipeline together with the digest below: the ACS result for that exact image
+      - "SCAN_SUMMARY=not scanned"
+images:
+  - name: app
+    newName: ${APP_IMAGE}   # filled in by scripts/push-repo.sh: <quay host>/cve-demo/app
+    # set by the pipeline (stage) and by the approved pull request (prod)
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

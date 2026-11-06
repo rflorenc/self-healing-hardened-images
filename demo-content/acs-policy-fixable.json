@@ -1,0 +1,37 @@
+{
+  "name": "Self-healing demo: fixable CVE in image",
+  "description": "Pipeline gate: the image contains a vulnerability rated Important or Critical for which a fix is available. Build stage only and unscoped: roxctl in the demo pipeline checks this category, so other workloads on the cluster are not affected.",
+  "rationale": "A fixed version exists, so the image can be rebuilt instead of waiting.",
+  "remediation": "Rebuild on the latest base image.",
+  "categories": [
+    "Self-Healing Demo"
+  ],
+  "lifecycleStages": [
+    "BUILD"
+  ],
+  "severity": "HIGH_SEVERITY",
+  "enforcementActions": [],
+  "policySections": [
+    {
+      "sectionName": "fixable important or critical",
+      "policyGroups": [
+        {
+          "fieldName": "Fixable",
+          "values": [
+            {
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "fieldName": "Severity",
+          "values": [
+            {
+              "value": ">= IMPORTANT"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Conforma policy for the BO1122 demo (mounted into the conforma-check task at /policy).
+# Built-in checks (image signature, attestation signature, keyless against Trusted Artifact Signer)
+# always run; the rules in cve_demo.rego add what the signed provenance must say.
+sources:
+  - name: cve-demo
+    policy: [/policy/rego]
+    ruleData:
+      pipeline: build-and-stage
+      pipeline_task: build
+      trusted_task_prefix: /apis/tekton.dev/v1/namespaces/openshift-pipelines/task/buildah@

@@ -1,0 +1,37 @@
+{{- /* One child Argo CD Application per enabled component under components/. */ -}}
+{{- $root := . }}
+{{- range $name, $c := .Values.components }}
+{{- if $c.enabled }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bo1122-{{ $name }}
+  namespace: {{ $root.Values.argocd.namespace }}
+  labels:
+    demo.redhat.com/application: "field-content"
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $c.wave | default "0" | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ $root.Values.argocd.project }}
+  source:
+    repoURL: {{ required "gitops.repoURL is injected by the catalog" $root.Values.gitops.repoURL }}
+    targetRevision: {{ $root.Values.gitops.revision }}
+    path: {{ printf "%s/components/%s" ($root.Values.gitops.path | trimSuffix "/") $name | trimPrefix "./" }}
+    helm:
+      valuesObject:
+        deployer: {{ $root.Values.deployer | toJson }}
+        component: {{ $c | toJson }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $c.namespace }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}
+{{- end }}

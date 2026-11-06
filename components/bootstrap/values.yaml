@@ -1,0 +1,4 @@
+deployer:
+  domain: ""
+component:
+  namespace: bo1122-catalog
