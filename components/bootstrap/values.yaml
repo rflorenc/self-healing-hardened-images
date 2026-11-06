@@ -1,4 +1,4 @@
 deployer:
   domain: ""
 component:
-  namespace: bo1122-catalog
+  namespace: self-healing-demo

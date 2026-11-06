@@ -1,10 +1,6 @@
 # METADATA
-# title: BO1122 demo release policy
-# description: >-
-#   Checks that run before an image may be proposed for production, on top of Conforma's built-in
-#   checks (image signature and attestation signature, verified keyless against Trusted Artifact
-#   Signer: Fulcio certificate for the pipeline identity, Rekor entry). The facts below come from the
-#   SLSA provenance that Tekton Chains signs for the build task.
+# title: Self-healing images release policy
+# description: Release checks on top of Conforma's built-in signature checks, from the SLSA provenance Tekton Chains signs.
 package cve_demo
 
 import rego.v1
@@ -54,9 +50,7 @@ _built_by_trusted_pipeline if {
 
 # METADATA
 # title: Built with the Red Hat build task
-# description: >-
-#   The build ran the buildah task shipped with OpenShift Pipelines (namespace openshift-pipelines),
-#   not a modified copy in an application namespace.
+# description: The build ran the buildah task shipped with OpenShift Pipelines, not a modified copy.
 # custom:
 #   short_name: trusted_build_task
 #   failure_msg: Image was not built with the trusted buildah task

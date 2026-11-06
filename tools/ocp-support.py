@@ -1,6 +1,4 @@
-"""ocp-support.py <ocp version> [<ocp version> ...]
-For each operator the demo uses, prints the newest channel and version published in the Red Hat
-operator index for that OpenShift version, from the public Red Hat catalog API."""
+"""ocp-support.py <ocp version> [<ocp version> ...]"""
 import json, sys, urllib.parse, urllib.request
 
 PACKAGES = ["openshift-pipelines-operator-rh", "openshift-gitops-operator", "rhacs-operator", "odf-operator",

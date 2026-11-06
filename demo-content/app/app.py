@@ -1,10 +1,4 @@
-"""Demo app for BO1122.
-
-A deliberately minimal stand-in workload: its job is to carry the base image. It uses the Python
-standard library only, so every CVE that ACS reports comes from the base image. The page and the
-startup log show which Python version and base image digest are running, so the audience can see
-production change after the pull request is merged.
-"""
+"""Demo app: shows the Python version, base image and ACS scan summary."""
 import logging
 import os
 import platform
@@ -37,7 +31,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, fmt, *args):
-        # one line per request; skip the kubelet readiness probe (every 10 s)
+        # skip the kubelet readiness probe
         if self.headers.get('User-Agent', '').startswith('kube-probe'):
             return
         log.info('%s %s', self.address_string(), fmt % args)

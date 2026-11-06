@@ -15,7 +15,7 @@ spec:
           image: app
           ports: [{containerPort: 8080}]
           envFrom:
-            - configMapRef: {name: app-info}   # APP_ENV, SCAN_SUMMARY: set per overlay
+            - configMapRef: {name: app-info}   # APP_ENV, SCAN_SUMMARY per overlay
           readinessProbe:
             httpGet: {path: /, port: 8080}
           resources:

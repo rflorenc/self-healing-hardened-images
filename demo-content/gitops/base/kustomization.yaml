@@ -1,6 +1,5 @@
 resources: [app.yaml]
-# Per-environment facts the app page shows. Overlays replace the values; Kustomize appends a hash
-# of the content to the ConfigMap name, so a new value rolls out new pods.
+# the overlays replace these values
 configMapGenerator:
   - name: app-info
     literals:

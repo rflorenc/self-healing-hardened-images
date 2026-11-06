@@ -6,7 +6,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: bo1122-{{ $name }}
+  name: self-healing-{{ $name }}
   namespace: {{ $root.Values.argocd.namespace }}
   labels:
     demo.redhat.com/application: "field-content"

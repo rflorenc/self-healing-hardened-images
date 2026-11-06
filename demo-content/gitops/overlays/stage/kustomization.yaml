@@ -5,10 +5,9 @@ configMapGenerator:
     behavior: merge
     literals:
       - APP_ENV=stage
-      # set by the pipeline together with the digest below: the ACS result for that exact image
+      # set by the pipeline with the digest below
       - "SCAN_SUMMARY=not scanned"
 images:
   - name: app
     newName: ${APP_IMAGE}   # filled in by scripts/push-repo.sh: <quay host>/cve-demo/app
-    # set by the pipeline (stage) and by the approved pull request (prod)
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

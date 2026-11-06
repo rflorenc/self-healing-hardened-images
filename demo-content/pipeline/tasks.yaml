@@ -1,13 +1,6 @@
-# Custom tasks for the BO1122 self-healing image demo. Shipped OpenShift Pipelines tasks
-# (git-clone, buildah) are referenced from the openshift-pipelines namespace by the pipelines.
-#
-# Secrets used (created by scripts/, never stored in git):
-#   gitea-token   token, username      Gitea API and git push
-#   acs-ci-token  token, endpoint,     ACS API token with the Continuous Integration role,
-#                 cluster, ca.pem      Central's internal endpoint, ACS cluster name, Central CA
+# Tasks for the self-healing images demo
 ---
-# Fails the pipeline if the image breaks an enforced ACS build-time policy (for example the
-# demo's "fixable CVE" policy); prints the vulnerability table for the log either way.
+# acs-image-check: fails the pipeline on an enforced ACS build-time policy
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -25,7 +18,7 @@ spec:
       secret: {secretName: acs-ci-token, items: [{key: ca.pem, path: ca.pem}]}
   steps:
     - name: check
-      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5   # ubi9/python-311
       env:
         - name: ROX_API_TOKEN
           valueFrom: {secretKeyRef: {name: acs-ci-token, key: token}}
@@ -40,7 +33,7 @@ spec:
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
-        # roxctl comes from Central itself, so its version always matches (ACS 5.0 serves only the -amd64 name)
+        # roxctl comes from Central, matching its version
         curl -sSfL --cacert /acs/ca.pem -H "Authorization: Bearer $ROX_API_TOKEN" \
           "https://$ROX_ENDPOINT/api/cli/download/roxctl-linux-amd64" -o /tmp/roxctl
         chmod +x /tmp/roxctl
@@ -64,9 +57,7 @@ spec:
         /tmp/roxctl image check -e "$ROX_ENDPOINT" --image "$(params.IMAGE)" \
           --cluster "$ROX_CLUSTER" --categories "Self-Healing Demo" --output table
 ---
-# Base-watch: compares the digest of the watched base image tag with the digest pinned in the
-# app's Containerfile. If Red Hat published a new image, commits the new digest to the app
-# repository. That commit is the event that starts the rebuild (through the Gitea webhook).
+# bump-base-image: commits a newer base digest to cve-demo/app
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -84,14 +75,14 @@ spec:
       description: '"true" if a new base image was committed'
   steps:
     - name: latest-digest
-      image: registry.redhat.io/rhel9/skopeo@sha256:fd3d5c37f5d204af77d02e2743a10e538a9d1e8b67d8736eff86b9be4c564e1f  # rhel9/skopeo, pinned
+      image: registry.redhat.io/rhel9/skopeo@sha256:fd3d5c37f5d204af77d02e2743a10e538a9d1e8b67d8736eff86b9be4c564e1f   # rhel9/skopeo
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
         skopeo inspect --override-os linux --override-arch amd64 --format '{{.Digest}}' \
           "docker://$(params.BASE_REPO):$(params.BASE_STREAM)" | tee /tekton/home/latest
     - name: commit-if-newer
-      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5   # ubi9/python-311
       env:
         - name: GIT_TOKEN
           valueFrom: {secretKeyRef: {name: gitea-token, key: token}}
@@ -115,9 +106,7 @@ spec:
         git push -q origin HEAD:main
         echo "Committed new base image digest."; printf true > "$(results.CHANGED.path)"
 ---
-# Writes the new image digest to the stage overlay on main (Argo CD syncs stage), and opens a
-# pull request against the protected prod branch (Argo CD's prod application tracks it). The
-# pipeline cannot push to prod; merging the pull request (user approver) is the one human step.
+# gitops-promote: stage overlay on main, pull request into the protected prod branch
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -141,7 +130,7 @@ spec:
     - name: PR_URL
   steps:
     - name: promote
-      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5   # ubi9/python-311
       env:
         - name: GIT_TOKEN
           valueFrom: {secretKeyRef: {name: gitea-token, key: token}}
@@ -161,12 +150,12 @@ spec:
           sed -i -E "s#- \"SCAN_SUMMARY=.*\"#- \"SCAN_SUMMARY=$summary\"#" "$f"
         }
 
-        # 1. stage: straight to main, Argo CD syncs it
+        # stage: straight to main
         set_digest stage
         git commit -qam "stage: app@$short (from app commit $(params.SOURCE_COMMIT))" -m "$summary" || echo "stage already at $short"
         git push -q origin HEAD:main
 
-        # 2. prod: a pull request against the protected prod branch, for a person to approve
+        # prod: a pull request for a person to approve
         branch="promote-$short"
         git fetch -q origin prod
         git checkout -qb "$branch" origin/prod; set_digest prod
@@ -177,12 +166,7 @@ spec:
           -X POST "$(params.GITEA_API)/pulls" -d "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('html_url','(existing pull request)'))")
         echo "Pull request: $url"; printf '%s' "$url" > "$(results.PR_URL.path)"
 ---
-# Conforma release policy check (Trusted Artifact Signer + signed SLSA provenance). Runs Conforma's
-# ec against the built image: built-in checks verify the image and attestation signatures keyless
-# (Fulcio certificate for the pipeline identity, Rekor entry, trust root from TUF); conforma/policy.yaml
-# and conforma/cve_demo.rego (ConfigMap conforma-policy) check what the provenance says.
-# Tekton Chains signs asynchronously after the build task, so the first attempts may find no
-# signature yet: the check retries for up to 2 minutes before it fails.
+# conforma-check: keyless signatures and provenance against conforma/policy.yaml
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -205,7 +189,7 @@ spec:
       description: 'one line for the pull request, for example "Conforma: passed (5 of 5 checks)"'
   steps:
     - name: validate
-      image: registry.redhat.io/rhtas/ec-rhel9@sha256:7953bf26248b4abf0a70b10750f7634e3800cd226597521e1e5ae3b67226a261  # rhtas/ec-rhel9 0.6, pinned
+      image: registry.redhat.io/rhtas/ec-rhel9@sha256:7953bf26248b4abf0a70b10750f7634e3800cd226597521e1e5ae3b67226a261   # rhtas/ec-rhel9 0.6
       env:
         - {name: HOME, value: /tmp}
         - {name: DOCKER_CONFIG, value: /docker}
@@ -242,14 +226,7 @@ spec:
     - name: docker
       secret: {secretName: quay-robot-pipeline, items: [{key: .dockerconfigjson, path: config.json}]}
 ---
-# Software bill of materials into Red Hat Trusted Profile Analyzer. The SBOM is Red Hat's own: every
-# Red Hat Hardened Image is published with an SPDX SBOM (tag sha256-<digest>.sbom next to the image),
-# with package URLs for every RPM. The task reads the base image digest pinned in the Containerfile,
-# resolves the linux/amd64 image, fetches Red Hat's SBOM for exactly that digest and uploads it to TPA
-# as client cli (Keycloak realm tpa), labelled with our image, its digest and the pipeline run.
-# Our app adds no packages on top of the base (limitation L7), so the package list is complete; apps
-# with their own dependencies would add a generated SBOM. (ACS's roxctl image sbom has no package
-# URLs, so TPA could not match it against advisories.)
+# sbom-upload: Red Hat's SBOM of the base image into Trusted Profile Analyzer
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -277,7 +254,7 @@ spec:
       description: 'one line for the pull request, for example "SBOM: 127 packages (Red Hat, base sha256:...), in Trusted Profile Analyzer <link>"'
   steps:
     - name: sbom
-      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5  # ubi9/python-311, pinned
+      image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5   # ubi9/python-311
       env:
         - name: TPA_CLIENT_SECRET
           valueFrom: {secretKeyRef: {name: tpa-cli-client, key: client-secret}}

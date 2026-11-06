@@ -1,9 +1,4 @@
-# Pipelines and triggers for the BO1122 demo. ${GITEA_INTERNAL_URL} and ${APP_IMAGE} are filled in
-# by scripts/install-pipeline.sh. In-cluster Git traffic uses the Gitea service (no TLS dependency
-# on the ingress certificate); the Gitea webhook calls the EventListener service directly.
-#
-#   base-watch       (scheduled)  new Red Hat base image?  ->  commit new digest to app repo
-#   build-and-stage  (git push)   clone, build, [Chains signs], ACS check, stage, prod pull request
+# build-and-stage, base-watch, the push trigger and the schedule
 ---
 apiVersion: tekton.dev/v1
 kind: Pipeline
@@ -46,23 +41,22 @@ spec:
       params:
         - {name: IMAGE, value: "$(params.APP_IMAGE):$(tasks.clone.results.COMMIT)"}
         - {name: DOCKERFILE, value: ./Containerfile}
-        # pushes to Red Hat Quay with TLS verification (credentials: robot cve-demo+pipeline on the pipeline SA)
+        # credentials: robot cve-demo+pipeline on the pipeline service account
       workspaces:
         - {name: source, workspace: source}
-    # Tekton Chains signs the image and records SLSA provenance when the build task succeeds.
+    # Tekton Chains signs the image when the build task succeeds
     - name: acs-check
       runAfter: [build]
       taskRef: {name: acs-image-check}
       params:
         - {name: IMAGE, value: "$(params.APP_IMAGE)@$(tasks.build.results.IMAGE_DIGEST)"}
-    # Conforma release policy: keyless signatures (Trusted Artifact Signer) + what the signed SLSA
-    # provenance says (built by this pipeline with the Red Hat buildah task). Runs next to the ACS check.
+    # Conforma: keyless signatures and provenance from this pipeline
     - name: conforma
       runAfter: [build]
       taskRef: {name: conforma-check}
       params:
         - {name: IMAGE, value: "$(params.APP_IMAGE)@$(tasks.build.results.IMAGE_DIGEST)"}
-    # SBOM into Trusted Profile Analyzer: Red Hat's SBOM for the exact base image digest we built on.
+    # Red Hat's SBOM of the base image into Trusted Profile Analyzer
     - name: sbom
       runAfter: [build]
       taskRef: {name: sbom-upload}
@@ -92,7 +86,7 @@ spec:
   params:
     - name: APP_REPO
       default: ${GITEA_INTERNAL_URL}/cve-demo/app.git
-    - name: BASE_REPO          # from .env (BASE_REPO, BASE_STREAM), filled in by install-pipeline.sh
+    - name: BASE_REPO   # from .env, filled in by install-pipeline.sh
       default: ${BASE_REPO}
     - name: BASE_STREAM
       default: "${BASE_STREAM}"
@@ -165,7 +159,7 @@ spec:
         - ref: {name: cel}
           params:
             - name: filter
-              # [skip ci] in the commit message: no build (used by scripts/reset.sh)
+              # [skip ci] skips the build, used by reset.sh
               value: >-
                 body.ref == 'refs/heads/main' && body.repository.name == 'app' &&
                 !body.head_commit.message.contains('[skip ci]')
@@ -173,8 +167,7 @@ spec:
         - {name: revision, value: $(body.after)}
       template: {ref: build-and-stage}
 ---
-# ---------------------------------------------------------------- schedule: base-watch
-# Suspended so the demo controls when "the advisory arrives"; set suspend: false for real use.
+# ---------------------------------------------------------------- schedule:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -216,7 +209,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: start
-              image: registry.redhat.io/openshift4/ose-cli@sha256:e6b8fda5ee0718197dd45b0b384e7880abe2a08be43e8b5bae3e26a54dd989d6  # ose-cli, pinned
+              image: registry.redhat.io/openshift4/ose-cli@sha256:e6b8fda5ee0718197dd45b0b384e7880abe2a08be43e8b5bae3e26a54dd989d6   # ose-cli
               command:
                 - /bin/sh
                 - -c

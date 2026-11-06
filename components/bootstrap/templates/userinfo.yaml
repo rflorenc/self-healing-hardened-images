@@ -1,13 +1,13 @@
-# Shown to the person who ordered the catalog item. Filled in further as components are added.
+# user information page for the person who ordered
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: bo1122-userinfo
+  name: self-healing-userinfo
   namespace: {{ .Values.component.namespace }}
   labels:
     demo.redhat.com/userinfo: ""
-    demo.redhat.com/application: "bo1122"
+    demo.redhat.com/application: "self-healing-images"
 data:
-  demo_title: "BO1122: self-healing images on OpenShift"
+  demo_title: "Self-healing hardened images on OpenShift"
   status: "Catalog chart skeleton: components are being added."
   cluster_domain: {{ .Values.deployer.domain | quote }}
