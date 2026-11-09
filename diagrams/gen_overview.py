@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates demo-overview.drawio, the BO1122 setup overview."""
+"""Generates demo-overview.drawio; PNG: drawio -x -f png -s 2 -o demo-overview.png demo-overview.drawio"""
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -13,13 +13,11 @@ S = {
     'comp_dark': 'rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#595959;strokeColor=#404040;fontSize=11;fontFamily=Helvetica;fontColor=#FFFFFF;',
     'task': f'rounded=0;whiteSpace=wrap;html=1;fillColor=#F2F2F2;strokeColor=#808080;fontSize=10;{FONT}',
     'ext': f'rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#EDEDED;strokeColor=#808080;fontSize=11;{FONT}',
-    'ext_planned': 'rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#B3B3B3;dashed=1;fontSize=11;fontFamily=Helvetica;fontColor=#8C8C8C;',
     'actor': f'shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#FFFFFF;strokeColor=#666666;fontSize=11;{FONT}',
     'title': f'text;html=1;align=left;verticalAlign=top;fontSize=20;fontStyle=1;{FONT}',
     'note': f'text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;{FONT}',
     'flow': 'edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#404040;strokeWidth=1.5;endArrow=blockThin;endFill=1;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#FFFFFF;labelBackgroundColor=#404040;',
     'data': 'edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#A6A6A6;strokeWidth=1.2;dashed=1;endArrow=open;endFill=0;fontSize=10;fontFamily=Helvetica;fontColor=#666666;labelBackgroundColor=#FFFFFF;',
-    'planned_edge': 'edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C8C8C8;strokeWidth=1.2;dashed=1;dashPattern=2 3;endArrow=open;endFill=0;fontSize=10;fontFamily=Helvetica;fontColor=#8C8C8C;labelBackgroundColor=#FFFFFF;',
 }
 
 cells = []
@@ -46,15 +44,14 @@ def edge(id, src, dst, label='', style='flow', exit=None, entry=None, points=())
 B = '<b>{}</b>'.format  # bold helper for HTML labels
 
 # ------------------------------------------------------------------ frame and title
-node('title', 'BO1122 demo: self-healing images on OpenShift, setup overview', 20, 0, 1200, 30, 'title')
-node('cluster', 'Red Hat OpenShift > 4.22', 260, 60, 1840, 1080, 'cluster')
+node('title', 'Self-healing hardened images on OpenShift', 20, 0, 1200, 30, 'title')
+node('cluster', 'Red Hat OpenShift 4.20 to 4.22', 260, 60, 1840, 1080, 'cluster')
 
 # ------------------------------------------------------------------ outside the cluster
 node('hi', f'{B("Red Hat Hardened Images")}<br>registry.access.redhat.com/hi/python:3.11<br>signature · attestation · SBOM per digest', 20, 80, 225, 80, 'ext')
 node('dev', 'Developer', 105, 330, 30, 50, 'actor')
 node('approver', 'Approver<br>the one human step', 105, 640, 30, 50, 'actor')
 node('secdata', f'{B("Red Hat security data")}<br>VEX in CSAF, vulnerability bundles', 2125, 640, 200, 60, 'ext')
-node('ai', f'{B("AI approval briefing")}<br>ACS MCP server + LiteMaaS<br>future work', 2125, 360, 200, 70, 'ext_planned')
 
 # ------------------------------------------------------------------ row A
 node('ns_gitea', 'gitea', 280, 100, 250, 360, 'ns')
@@ -64,7 +61,7 @@ node('repo_gitops', f'{B("cve-demo/gitops")}<br>overlays/stage · overlays/prod<
 node('pr', 'Pull request into protected prod<br>ACS · Conforma · SBOM lines', 300, 390, 210, 50, 'comp_dark')
 
 node('ns_ci', 'cve-demo-ci', 560, 100, 760, 360, 'ns')
-node('cron', f'{B("CronJob base-watch")}<br>schedule, suspended for the demo', 580, 135, 200, 50, 'comp')
+node('cron', f'{B("CronJob base-watch")}<br>schedule', 580, 135, 200, 50, 'comp')
 node('pl_watch', f'{B("Pipeline base-watch")}<br>bump-base-image, skopeo', 830, 135, 200, 50, 'comp')
 node('el', f'{B("EventListener app-push")}<br>CEL filter, [skip ci]', 1090, 135, 210, 50, 'comp')
 node('pl_build', 'Pipeline build-and-stage', 580, 210, 720, 100, 'band')
@@ -99,7 +96,7 @@ node('d_stage', f'{B("Deployment app")}<br>Service · Route', 570, 615, 150, 50,
 node('ns_prod', 'cve-demo-prod', 750, 500, 170, 300, 'ns')
 node('d_prod', f'{B("Deployment app")}<br>Service · Route', 760, 685, 150, 50, 'comp')
 
-node('ns_acs', 'rhacs-operator', 940, 500, 430, 370, 'ns')
+node('ns_acs', 'stackrox', 940, 500, 430, 370, 'ns')
 L, R, W = 955, 1170, 185
 node('collector', f'{B("Collector")}<br>runtime data, every node', L, 535, W, 50, 'comp')
 node('central', f'{B("Central")}<br>API · UI · policies', R, 535, W, 56, 'comp')
@@ -110,24 +107,24 @@ node('scanner', f'{B("Scanner V4")}<br>indexer · matcher · DB', R, 700, W, 56,
 node('pol_sig', f'{B("Policy")}: signed by the<br>pipeline only, cve-demo-prod', L, 790, W, 50, 'comp')
 node('sigint', f'{B("Signature integration")}<br>Fulcio identity · Rekor', R, 790, W, 50, 'comp')
 
-node('ns_kc', 'keycloak', 1390, 500, 210, 300, 'ns')
+node('ns_kc', 'demo-keycloak', 1390, 500, 210, 300, 'ns')
 node('keycloak', f'{B("Red Hat build of Keycloak")}<br>PostgreSQL', 1400, 535, 190, 50, 'comp')
 node('realm_tas', f'{B("realm tas-chains")}<br>chains@cve-demo.local', 1400, 615, 190, 50, 'comp')
 node('realm_tpa', f'{B("realm tpa")}<br>UI: auditor · API: pipeline', 1400, 695, 190, 50, 'comp')
 
 node('ns_tpa', 'trusted-profile-analyzer', 1620, 500, 230, 300, 'ns')
 node('tpa', f'{B("Trusted Profile Analyzer")}<br>SBOMs, advisories, VEX<br>PostgreSQL', 1635, 535, 200, 66, 'comp')
-node('importer', f'{B("Importer")}<br>Red Hat VEX for the<br>demo CVEs, daily', 1635, 640, 200, 66, 'comp')
+node('importer', f'{B("Importer")}<br>Red Hat VEX for the<br>scanned CVEs, daily', 1635, 640, 200, 66, 'comp')
 
 node('ns_storage', 'openshift-storage', 1870, 500, 210, 300, 'ns')
-node('noobaa', f'{B("NooBaa, S3")}<br>Multicloud Object Gateway,<br>standalone, lean', 1880, 535, 190, 66, 'comp')
+node('noobaa', f'{B("NooBaa, S3")}<br>Multicloud Object Gateway', 1880, 535, 190, 66, 'comp')
 node('buckets', 'buckets: Quay images,<br>TPA documents', 1880, 640, 190, 44, 'comp')
 
 # ------------------------------------------------------------------ operators band (bottom)
-node('ops', 'Operators: pinned channels, manual install-plan approval', 280, 905, 1800, 215, 'band')
+node('ops', 'Operators', 280, 905, 1800, 215, 'band')
 ops = ['OpenShift Pipelines 1.24<br>Pipelines · Triggers · Chains', 'OpenShift GitOps 1.22<br>Argo CD',
-       'Advanced Cluster Security 5.0<br>Central · Secured cluster', 'Red Hat Quay 3.18', 'OpenShift Data Foundation 4.20<br>NooBaa only',
-       'Red Hat build of Keycloak 26.6', 'Trusted Artifact Signer 1.5', 'Trusted Profile Analyzer 3.1', 'Gitea operator<br>demo Git server']
+       'Advanced Cluster Security 5.0<br>Central · Secured cluster', 'Red Hat Quay 3.18', 'OpenShift Data Foundation<br>NooBaa',
+       'Red Hat build of Keycloak 26.6', 'Trusted Artifact Signer 1.5', 'Trusted Profile Analyzer 3.1', 'Gitea operator']
 for i, lab in enumerate(ops):
     row, col = divmod(i, 5)
     node(f'op{i}', lab, 300 + col * 355, 940 + row * 85, 335, 60, 'op')
@@ -167,9 +164,8 @@ edge('d_tpa_kc', 'tpa', 'realm_tpa', style='data', exit=(0, 0.5), entry=(1, 0.5)
 edge('d_gitops_argo', 'repo_gitops', 'argocd', '', style='data', exit=(0, 0.5), entry=(0, 0.5), points=[(288, 330), (288, 560)])
 edge('d_sigint', 'sigint', 'pol_sig', style='data', exit=(0, 0.5), entry=(1, 0.5))
 edge('d_sig_rekor', 'sigint', 'rekor', 'Rekor online', style='data', exit=(1, 0.8), entry=(0.5, 1), points=[(1378, 830), (1378, 890), (1965, 890), (1965, 285)])
-edge('p_ai', 'ai', 'pr', 'comment, future', style='planned_edge', exit=(0.5, 0), entry=(1, 0.2), points=[(2225, 70), (540, 70), (540, 400)])
 
-xml = ('<mxfile host="Electron" type="device"><diagram id="bo1122-overview" name="Demo setup">'
+xml = ('<mxfile host="Electron" type="device"><diagram id="overview" name="Setup overview">'
        '<mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" '
        'fold="1" page="1" pageScale="1" pageWidth="2360" pageHeight="1160" math="0" shadow="0" background="#FFFFFF">'
        '<root><mxCell id="0"/><mxCell id="1" parent="0"/>' + ''.join(cells) + '</root></mxGraphModel></diagram></mxfile>')
