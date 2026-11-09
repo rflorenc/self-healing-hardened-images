@@ -1,0 +1,23 @@
+# standalone Multicloud Object Gateway: NooBaa only, no Ceph
+apiVersion: ocs.openshift.io/v1
+kind: StorageCluster
+metadata:
+  name: ocs-storagecluster
+  namespace: openshift-storage
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+spec:
+  # resourceProfile sizes Ceph only; NooBaa is sized by resources below
+  resourceProfile: lean
+  resources:
+    noobaa-core:
+      requests: {cpu: 500m, memory: 2Gi}
+      limits: {cpu: "1", memory: 2Gi}
+    noobaa-db:
+      requests: {cpu: 250m, memory: 1Gi}
+      limits: {cpu: 500m, memory: 1Gi}
+    noobaa-endpoint:
+      requests: {cpu: 250m, memory: 1Gi}
+      limits: {cpu: 500m, memory: 1Gi}
+  multiCloudGateway:
+    reconcileStrategy: standalone

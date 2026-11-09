@@ -1,0 +1,25 @@
+# Argo CD instance for the demo
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: argocd
+  namespace: cve-demo-gitops
+spec:
+  server:
+    route:
+      enabled: true
+      tls:
+        termination: reencrypt
+  sso:
+    provider: dex
+    dex:
+      openShiftOAuth: true
+  rbac:
+    defaultPolicy: role:readonly
+    policy: g, system:cluster-admins, role:admin
+    scopes: '[groups]'
+  # poll every 30 s with a 30 s revision cache: Argo CD ignores the Gitea webhooks
+  extraConfig:
+    timeout.reconciliation: 30s
+  repo:
+    extraRepoCommandArgs: [--revision-cache-expiration, 30s]

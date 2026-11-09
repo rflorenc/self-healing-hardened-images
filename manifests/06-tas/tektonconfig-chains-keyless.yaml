@@ -1,0 +1,24 @@
+# Chains keyless signing, merged into TektonConfig config by phases/06-tas.sh
+spec:
+  chain:
+    signers.x509.fulcio.enabled: true
+    signers.x509.fulcio.address: http://fulcio-server.${TAS_NS}.svc
+    signers.x509.fulcio.issuer: https://${KC_HOST}/realms/tas-chains
+    signers.x509.fulcio.provider: filesystem
+    signers.x509.identity.token.file: /var/run/sigstore/keycloak/oidc-token
+    signers.x509.tuf.mirror.url: http://tuf.${TAS_NS}.svc
+    transparency.enabled: "true"
+    transparency.url: http://rekor-server.${TAS_NS}.svc
+    options:
+      deployments:
+        tekton-chains-controller:
+          spec:
+            template:
+              spec:
+                volumes:
+                  - name: keycloak-token
+                    secret: {secretName: chains-oidc-token}
+                containers:
+                  - name: tekton-chains-controller
+                    volumeMounts:
+                      - {name: keycloak-token, mountPath: /var/run/sigstore/keycloak, readOnly: true}

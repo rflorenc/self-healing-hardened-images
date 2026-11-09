@@ -1,0 +1,60 @@
+# TPA on NooBaa S3 with PostgreSQL and realm tpa
+apiVersion: rhtpa.io/v1
+kind: TrustedProfileAnalyzer
+metadata:
+  name: tpa
+  namespace: ${TPA_NS}
+spec:
+  appDomain: -${TPA_NS}.${DOMAIN}
+  openshift: {useServiceCa: true}
+  # NooBaa's S3 endpoint has a service-CA certificate
+  tls:
+    additionalTrustAnchor: /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt
+  ingress:
+    additionalAnnotations:
+      route.openshift.io/termination: edge
+  database:
+    host: postgres
+    port: "5432"
+    name: trustify
+    username: {valueFrom: {secretKeyRef: {name: postgres, key: username}}}
+    password: {valueFrom: {secretKeyRef: {name: postgres, key: password}}}
+    sslMode: disable
+    maximumConnections: 20   # per pool: the defaults exhaust a small PostgreSQL
+  # the chart requires separate migration credentials
+  migrateDatabase:
+    username: {valueFrom: {secretKeyRef: {name: postgres, key: username}}}
+    password: {valueFrom: {secretKeyRef: {name: postgres, key: password}}}
+  storage:
+    type: s3
+    bucket: ${TPA_BUCKET}
+    region: https://s3.openshift-storage.svc:443
+    pathStyle: true
+    accessKey: {valueFrom: {secretKeyRef: {name: tpa-storage, key: AWS_ACCESS_KEY_ID}}}
+    secretKey: {valueFrom: {secretKeyRef: {name: tpa-storage, key: AWS_SECRET_ACCESS_KEY}}}
+  oidc:
+    issuerUrl: https://${KC_HOST}/realms/tpa
+    clients:
+      frontend:
+        clientId: frontend
+      cli:
+        clientId: cli
+        clientSecret: {valueFrom: {secretKeyRef: {name: tpa-cli-client, key: client-secret}}}
+  modules:
+    createDatabase: {enabled: false}   # PostgreSQL creates the database
+    migrateDatabase: {enabled: true}
+    createImporters: {enabled: false}   # created through the API by phases/10-gitops.sh
+    server:
+      enabled: true
+      replicas: 1
+      resources:
+        requests: {cpu: 500m, memory: 1Gi}
+        limits: {memory: 4Gi}
+    importer:
+      enabled: true
+      replicas: 1
+      concurrency: 1
+      resources:
+        requests: {cpu: 500m, memory: 1Gi}
+        limits: {memory: 6Gi}
+      workingDirectory: {size: 10Gi}

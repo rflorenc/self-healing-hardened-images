@@ -1,0 +1,47 @@
+# PostgreSQL 16 for one product
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: ${PG_NS}
+  labels: {app: postgres, app.kubernetes.io/part-of: cve-demo}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: registry.redhat.io/rhel9/postgresql-16:1-1793637208
+          ports: [{containerPort: 5432}]
+          env:
+            - {name: POSTGRESQL_DATABASE, value: "${PG_DB}"}
+            - {name: POSTGRESQL_MAX_CONNECTIONS, value: "200"}   # server, importer and migration jobs each hold a pool
+            - name: POSTGRESQL_USER
+              valueFrom: {secretKeyRef: {name: postgres, key: username}}
+            - name: POSTGRESQL_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres, key: password}}
+          readinessProbe:
+            exec: {command: [/usr/libexec/check-container]}
+            initialDelaySeconds: 5
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          volumeMounts: [{name: data, mountPath: /var/lib/pgsql/data}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ${PG_NS}
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432}]

@@ -1,0 +1,22 @@
+# stage follows main, prod follows the protected prod branch
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-stage
+  namespace: cve-demo-gitops
+spec:
+  project: default
+  source: {repoURL: '${GITEA_INTERNAL_URL}/cve-demo/gitops.git', targetRevision: main, path: overlays/stage}
+  destination: {server: 'https://kubernetes.default.svc', namespace: cve-demo-stage}
+  syncPolicy: {automated: {prune: true, selfHeal: true}}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-prod
+  namespace: cve-demo-gitops
+spec:
+  project: default
+  source: {repoURL: '${GITEA_INTERNAL_URL}/cve-demo/gitops.git', targetRevision: prod, path: overlays/prod}
+  destination: {server: 'https://kubernetes.default.svc', namespace: cve-demo-prod}
+  syncPolicy: {automated: {prune: true, selfHeal: true}}

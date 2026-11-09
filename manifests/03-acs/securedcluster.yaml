@@ -1,0 +1,20 @@
+# secured cluster in Central's namespace: no init bundle needed
+apiVersion: platform.stackrox.io/v1alpha1
+kind: SecuredCluster
+metadata:
+  name: stackrox-secured-cluster-services
+  namespace: ${ACS_NS}
+spec:
+  clusterName: ${ACS_CLUSTER}
+  admissionControl:
+    enforcement: Enabled
+    bypass: BreakGlassAnnotation
+    failurePolicy: Ignore
+  sensor:
+    resources:   # demo size
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {memory: 4Gi}
+  scanner:
+    scannerComponent: AutoSense
+  scannerV4:
+    scannerComponent: AutoSense

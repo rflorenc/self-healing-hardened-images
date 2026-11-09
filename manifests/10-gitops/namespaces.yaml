@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cve-demo-ci
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cve-demo-gitops
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cve-demo-stage
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+    argocd.argoproj.io/managed-by: cve-demo-gitops
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cve-demo-prod
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+    argocd.argoproj.io/managed-by: cve-demo-gitops

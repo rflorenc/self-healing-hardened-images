@@ -1,0 +1,17 @@
+# Gitea instance, the demo's Git server
+apiVersion: pfe.rhpds.com/v1
+kind: Gitea
+metadata:
+  name: gitea
+  namespace: ${GITEA_NS}
+spec:
+  giteaAdminUser: gitea-admin
+  giteaImageTag: "28.3.0"   # the operator defaults to latest
+  postgresqlImageTag: "1-1793706505"
+  giteaAdminEmail: gitea-admin@cve-demo.local
+  giteaAdminPasswordLength: 16
+  giteaCreateUsers: false
+  giteaMigrateRepositories: false
+  giteaSsl: true
+  giteaWebhookAllowedHostList: external,private
+  giteaWebhookSkipTlsVerify: true

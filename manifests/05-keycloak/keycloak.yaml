@@ -1,0 +1,27 @@
+# Keycloak behind an edge route; TLS ends at the router
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: ${KC_NS}
+spec:
+  instances: 1
+  db:
+    vendor: postgres
+    host: postgres
+    database: keycloak
+    usernameSecret: {name: postgres, key: username}
+    passwordSecret: {name: postgres, key: password}
+  http:
+    httpEnabled: true
+  hostname:
+    hostname: https://${KC_HOST}
+  proxy:
+    headers: xforwarded
+  ingress:
+    enabled: true
+    annotations:
+      route.openshift.io/termination: edge
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {memory: 2Gi}

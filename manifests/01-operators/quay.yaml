@@ -1,0 +1,15 @@
+# Quay operator, cluster-wide
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: quay-operator
+  namespace: openshift-operators
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+spec:
+  channel: stable-3.18
+  startingCSV: quay-operator.v3.18.2   # the version this demo is validated on
+  name: quay-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Manual   # no surprise upgrades

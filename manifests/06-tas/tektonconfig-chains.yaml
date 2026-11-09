@@ -1,0 +1,12 @@
+# Chains settings, merged into TektonConfig config
+spec:
+  chain:
+    disabled: false
+    artifacts.taskrun.format: in-toto
+    artifacts.taskrun.storage: oci
+    artifacts.pipelinerun.format: in-toto
+    artifacts.pipelinerun.storage: oci
+    artifacts.oci.format: simplesigning
+    artifacts.oci.storage: oci
+    artifacts.oci.signer: x509
+    transparency.enabled: "false"

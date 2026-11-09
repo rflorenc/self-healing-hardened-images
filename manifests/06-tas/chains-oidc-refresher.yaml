@@ -1,0 +1,75 @@
+# keeps a fresh Keycloak token for Tekton Chains in secret chains-oidc-token
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cve-demo-oidc-refresher
+  namespace: openshift-pipelines
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cve-demo-oidc-refresher
+  namespace: openshift-pipelines
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [chains-oidc-token]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cve-demo-oidc-refresher
+  namespace: openshift-pipelines
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: cve-demo-oidc-refresher}
+subjects: [{kind: ServiceAccount, name: cve-demo-oidc-refresher, namespace: openshift-pipelines}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cve-demo-oidc-refresher
+  namespace: openshift-pipelines
+  labels: {app: cve-demo-oidc-refresher, app.kubernetes.io/part-of: cve-demo}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: cve-demo-oidc-refresher}}
+  template:
+    metadata:
+      labels: {app: cve-demo-oidc-refresher}
+    spec:
+      serviceAccountName: cve-demo-oidc-refresher
+      containers:
+        - name: refresher
+          image: registry.access.redhat.com/ubi9/python-311@sha256:7b6cb58d3ff034df7b300800bd89a469d9bd2f739d43250d76b9c9e805307ab5   # ubi9/python-311
+          env:
+            - {name: TOKEN_URL, value: "http://keycloak-service.${KC_NS}.svc:8080/realms/tas-chains/protocol/openid-connect/token"}
+            - name: CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: tas-chains-client, key: client-secret}}
+          command: [python3, -u, -c]
+          args:
+            - |
+              import json, os, ssl, time, urllib.parse, urllib.request
+              SA = "/var/run/secrets/kubernetes.io/serviceaccount/"
+              API = "https://kubernetes.default.svc/api/v1/namespaces/openshift-pipelines/secrets/chains-oidc-token"
+              ctx = ssl.create_default_context(cafile=SA + "ca.crt")
+              while True:
+                  try:
+                      body = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": "trusted-artifact-signer",
+                                                     "client_secret": os.environ["CLIENT_SECRET"]}).encode()
+                      tok = json.load(urllib.request.urlopen(os.environ["TOKEN_URL"], body, timeout=20))["access_token"]
+                      req = urllib.request.Request(API, method="PATCH", data=json.dumps({"stringData": {"oidc-token": tok}}).encode(),
+                          headers={"Content-Type": "application/merge-patch+json",
+                                   "Authorization": "Bearer " + open(SA + "token").read().strip()})
+                      urllib.request.urlopen(req, context=ctx, timeout=20)
+                      print(time.strftime("%H:%M:%S"), "token refreshed", flush=True)
+                  except Exception as e:
+                      print(time.strftime("%H:%M:%S"), "refresh failed:", e, flush=True)
+                  time.sleep(120)
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}

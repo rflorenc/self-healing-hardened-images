@@ -1,3 +1,8 @@
-.DS_Store
-*.tgz
 .env
+*.local
+*.tgz
+.DS_Store
+__pycache__/
+# internal working documents, never published
+PLAN.md
+SLIDE_NOTES.md

@@ -1,0 +1,25 @@
+# Fulcio trusts realm tas-chains; no timestamp authority
+apiVersion: rhtas.redhat.com/v1
+kind: Securesign
+metadata:
+  name: securesign
+  namespace: ${TAS_NS}
+spec:
+  fulcio:
+    config:
+      oidcIssuers:
+        - type: email
+          issuer: https://${KC_HOST}/realms/tas-chains
+          issuerURL: https://${KC_HOST}/realms/tas-chains
+          clientID: trusted-artifact-signer
+    trustedCA: {name: cluster-ca}
+    ingress: {enabled: true}
+    signer:
+      certificateChain:
+        organizationName: Red Hat BO1122 demo
+  rekor:
+    ingress: {enabled: true}
+  ctlog: {}
+  trillian: {}
+  tuf:
+    ingress: {enabled: true}

@@ -1,0 +1,36 @@
+# ACS Central, demo-sized; volume sizes apply to new installs only
+apiVersion: platform.stackrox.io/v1alpha1
+kind: Central
+metadata:
+  name: stackrox-central-services
+  namespace: ${ACS_NS}
+spec:
+  central:
+    adminPasswordSecret:
+      name: central-admin-password
+    exposure:
+      route:
+        enabled: true
+    resources:
+      requests: {cpu: "1", memory: 2Gi}
+      limits: {memory: 4Gi}
+    db:
+      resources:
+        requests: {cpu: "1", memory: 2Gi}
+        limits: {memory: 8Gi}
+      persistence:
+        persistentVolumeClaim: {size: 30Gi}
+  scannerV4:
+    indexer:
+      scaling: {autoScaling: Disabled, replicas: 1}
+      resources:
+        requests: {cpu: 500m, memory: 1Gi}
+        limits: {memory: 4Gi}
+    matcher:
+      scaling: {autoScaling: Disabled, replicas: 1}
+      resources:
+        requests: {cpu: "1", memory: 4Gi}
+        limits: {cpu: "4", memory: 8Gi}   # the first vulnerability load is CPU-bound
+    db:
+      persistence:
+        persistentVolumeClaim: {size: 30Gi}

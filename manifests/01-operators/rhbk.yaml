@@ -1,0 +1,33 @@
+# Red Hat build of Keycloak operator in our own namespace, so it never touches another Keycloak on the cluster
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${KC_NS}
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: ${KC_NS}
+  namespace: ${KC_NS}
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+spec:
+  targetNamespaces: [${KC_NS}]
+  upgradeStrategy: Default
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhbk-operator
+  namespace: ${KC_NS}
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+spec:
+  channel: stable-v26.6
+  startingCSV: rhbk-operator.v26.6.7-opr.3   # the version this demo is validated on
+  name: rhbk-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Manual   # no surprise upgrades

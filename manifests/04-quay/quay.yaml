@@ -1,0 +1,33 @@
+# Quay on NooBaa; Clair off, ACS is the scanner
+apiVersion: quay.redhat.com/v1
+kind: QuayRegistry
+metadata:
+  name: registry
+  namespace: ${QUAY_NS}
+spec:
+  configBundleSecret: quay-config-bundle
+  components:
+    - {kind: objectstorage, managed: true}
+    - kind: quay
+      managed: true
+      overrides:
+        replicas: 1
+        # cap the worker pools: Quay sizes them by the node's CPU count
+        env:
+          - {name: WORKER_COUNT_WEB, value: "2"}
+          - {name: WORKER_COUNT_REGISTRY, value: "4"}
+          - {name: WORKER_COUNT_SECSCAN, value: "1"}
+        resources:
+          requests: {cpu: 500m, memory: 4Gi}   # about 4.5 GiB at rest
+          limits: {memory: 8Gi}
+    - kind: postgres
+      managed: true
+      overrides:
+        resources:
+          requests: {cpu: 250m, memory: 1Gi}
+          limits: {memory: 2Gi}
+    - {kind: clair, managed: false}
+    - {kind: clairpostgres, managed: false}
+    - {kind: horizontalpodautoscaler, managed: false}
+    - {kind: mirror, managed: false}
+    - {kind: monitoring, managed: false}

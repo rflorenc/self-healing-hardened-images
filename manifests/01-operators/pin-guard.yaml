@@ -1,0 +1,33 @@
+# warns on and audits any of our operator subscriptions that is not pinned to a validated version
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cve-demo-operator-pins
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [operators.coreos.com]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [subscriptions]
+    objectSelector:
+      matchLabels:
+        app.kubernetes.io/managed-by: cve-demo-setup
+  validations:
+    - expression: "object.spec.installPlanApproval == 'Manual'"
+      message: "subscriptions of this demo use Manual install-plan approval: no upgrades without a decision"
+    - expression: "object.spec.name == 'odf-operator' || (has(object.spec.startingCSV) && object.spec.startingCSV != '')"
+      message: "subscriptions of this demo pin startingCSV to the validated version"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cve-demo-operator-pins
+  labels:
+    app.kubernetes.io/managed-by: cve-demo-setup
+spec:
+  policyName: cve-demo-operator-pins
+  validationActions: [Warn, Audit]
