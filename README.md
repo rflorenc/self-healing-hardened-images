@@ -88,7 +88,8 @@ Where things are afterwards:
 | Keycloak admin | `https://keycloak-demo-keycloak.<apps domain>` | secret `keycloak-initial-admin` in `demo-keycloak` |
 
 ## Running the demo
-All in `demo/cve-fire-drill/`:
+The full runbook, with URLs, logins and what to show at each step: [demo/cve-fire-drill/README.md](demo/cve-fire-drill/README.md).
+In short, all in `demo/cve-fire-drill/`:
 1. Start: prod and stage show the baseline, "ACS at build: 45 fixable Important/Critical CVEs"; the number
    moves with new vulnerability data, check it the morning of a recording.
 2. The advisory arrives: `run.sh` starts base-watch and follows the build.
