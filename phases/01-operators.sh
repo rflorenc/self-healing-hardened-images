@@ -3,13 +3,21 @@
 cd "$(dirname "$0")/.." && . lib/env.sh
 require_cluster
 
-approve_first() {  # approve_first <namespace> <subscription>: approves the initial InstallPlan
-  local ip
+approve_first() {  # approve_first <namespace> <subscription>: approves the initial InstallPlan if it holds only pinned versions
+  local ip c op want
   for _ in $(seq 1 30); do
     ip=$(oc get subscriptions.operators.coreos.com "$2" -n "$1" -o jsonpath='{.status.installPlanRef.name}' 2>/dev/null || true)
     [ -n "$ip" ] && break; sleep 5
   done
   [ -n "$ip" ] || die "no InstallPlan for $2 in $1: oc get subscription $2 -n $1 -o yaml"
+  # OLM puts every pending change of a namespace into one plan, upgrades of other operators included
+  for c in $(oc get installplan "$ip" -n "$1" -o jsonpath='{.spec.clusterServiceVersionNames[*]}'); do
+    for op in $OPS; do
+      want=$(pinned_csv "${op%%:*}")
+      case $c in "${op#*:}".v*) [ -z "$want" ] || [ "$c" = "$want" ] \
+        || die "install plan $ip in $1 also carries $c, the demo is validated on $want: not approved" ;; esac
+    done
+  done
   oc patch installplan "$ip" -n "$1" --type merge -p '{"spec":{"approved":true}}' >/dev/null
   ok "approved the first install of $2 ($ip)"
 }
@@ -39,24 +47,27 @@ ODF_CHANNEL=$(odf_channel)
 OPS=$DEMO_OPERATORS
 oc apply -f manifests/01-operators/pin-guard.yaml >/dev/null
 ok "pin guard: warns on any of our subscriptions without Manual approval and a pinned startingCSV"
+pending=""
 for op in $OPS; do
   file=${op%%:*}; pkg=${op#*:}
   if installed "$pkg"; then
-    ns=$(subns "$pkg")
-    if [ -z "$(oc get subscriptions.operators.coreos.com "$(subname "$pkg")" -n "$ns" -o jsonpath='{.status.installedCSV}' 2>/dev/null)" ]; then
-      approve_first "$ns" "$(subname "$pkg")"   # subscribed, first install still waiting (an interrupted earlier run)
+    if [ -z "$(oc get subscriptions.operators.coreos.com "$(subname "$pkg")" -n "$(subns "$pkg")" -o jsonpath='{.status.installedCSV}' 2>/dev/null)" ]; then
+      pending="$pending $pkg"   # subscribed, first install still waiting: an interrupted earlier run
     else
       ok "$pkg already installed: leaving its configuration unchanged"
     fi
   else
     [ "$pkg" = rhbk-operator ] && rhbk_guard
     og_guard "$file" "$pkg"
-    say "installing $pkg"; render "manifests/01-operators/$file.yaml" ODF_CHANNEL KC_NS | oc apply -f - >/dev/null
-    ns=$(subns "$pkg")
-    approve_first "$ns" "$pkg"
+    say "subscribing $pkg"; render "manifests/01-operators/$file.yaml" ODF_CHANNEL KC_NS | oc apply -f - >/dev/null
+    pending="$pending $pkg"
   fi
   ap=$(oc get subscriptions.operators.coreos.com "$(subname "$pkg")" -n "$(subns "$pkg")" -o jsonpath='{.spec.installPlanApproval}' 2>/dev/null || true)
   [ "$ap" = Manual ] || warn "$pkg was installed by someone else with automatic upgrades: left as it is, it may change version under the demo"
+done
+# approve only once every subscription exists, so a shared namespace gets one plan with the pinned versions
+for pkg in $pending; do
+  approve_first "$(subns "$pkg")" "$(subname "$pkg")"
 done
 for op in $OPS; do
   wait_csv "${op#*:}"
