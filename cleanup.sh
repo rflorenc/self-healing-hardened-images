@@ -87,6 +87,7 @@ if ours ns "$ACS_NS"; then
   gone "$ACS_NS"
 fi
 unsub rhacs-operator rhacs-operator; ours ns rhacs-operator && gone rhacs-operator
+installed rhacs-operator || console_plugin disable advanced-cluster-security
 
 say "OpenShift Data Foundation and NooBaa"
 if ours storagecluster ocs-storagecluster -n openshift-storage; then
@@ -102,6 +103,7 @@ if ours subscriptions.operators.coreos.com openshift-pipelines-operator-rh -n op
   oc delete tektonconfig config --ignore-not-found --wait=true --timeout=600s >/dev/null 2>&1 || true
 fi
 unsub openshift-operators openshift-pipelines-operator-rh
+installed openshift-pipelines-operator-rh || console_plugin disable pipelines-console-plugin
 unsub openshift-gitops-operator openshift-gitops-operator
 ours ns openshift-gitops-operator && gone openshift-gitops-operator
 oc delete validatingadmissionpolicybinding,validatingadmissionpolicy cve-demo-operator-pins --ignore-not-found >/dev/null

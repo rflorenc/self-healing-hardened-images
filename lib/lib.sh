@@ -143,3 +143,15 @@ other_rhbk() {  # prints namespace=channel of every Keycloak operator outside ou
     [ "${o%%=*}" = "$KC_NS" ] || echo "$o"
   done
 }
+
+console_plugin() {  # console_plugin enable|disable <name>: the console loads a plugin only once it is listed here
+  local have
+  oc get consoleplugin "$2" >/dev/null 2>&1 || [ "$1" = disable ] || return 0
+  have=$(oc get consoles.operator.openshift.io cluster -o jsonpath='{.spec.plugins}')
+  python3 - "$1" "$2" "$have" <<'PY' | oc patch consoles.operator.openshift.io cluster --type merge --patch-file /dev/stdin >/dev/null
+import json, sys
+mode, name, have = sys.argv[1], sys.argv[2], json.loads(sys.argv[3] or "[]")
+want = have + [name] if mode == "enable" and name not in have else [p for p in have if p != name] if mode == "disable" else have
+print(json.dumps({"spec": {"plugins": want}}))
+PY
+}

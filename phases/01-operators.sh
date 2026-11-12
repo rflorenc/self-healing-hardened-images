@@ -77,4 +77,8 @@ for op in $OPS; do
   have=$(oc get subscriptions.operators.coreos.com -n "$(subns "${op#*:}")" -o jsonpath="{range .items[?(@.spec.name=='${op#*:}')]}{.status.installedCSV}{end}")
   [ -z "$want" ] || [ "$want" = "$have" ] || warn "${op#*:} runs $have, the demo is validated on $want"
 done
+for plugin in pipelines-console-plugin advanced-cluster-security; do
+  console_plugin enable "$plugin"
+done
+ok "console plugins enabled: Pipelines and Advanced Cluster Security pages in the OpenShift console"
 ok "operators ready"
