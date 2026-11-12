@@ -3,7 +3,7 @@
 cd "$(dirname "$0")/.." && . lib/env.sh
 require_cluster
 
-existing=$(oc get central -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1)
+existing=$(oc get central -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1 || true)
 if [ -n "$existing" ] && [ "$existing" != "$ACS_NS" ]; then
   die "Central already runs in namespace '$existing': set ACS_NS=$existing in .env and re-run"
 fi

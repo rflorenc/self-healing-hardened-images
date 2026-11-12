@@ -108,7 +108,7 @@ for op in $DEMO_OPERATORS; do
 done
 
 say "Products already on the cluster"
-central=$(oc get central -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1)
+central=$(oc get central -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | head -1 || true)   # no CRD yet on a fresh cluster
 if [ -n "$central" ] && [ "$central" != "$ACS_NS" ]; then bad "ACS Central already runs in namespace $central" "set ACS_NS=$central in .env"
 elif [ -n "$central" ]; then ok "ACS Central in $central: reused; phase 03 sets demo resource sizes"
 else plan "ACS Central: will be created in $ACS_NS"; fi
@@ -119,12 +119,12 @@ elif ours storagecluster "$stc" -n openshift-storage; then ok "StorageCluster $s
 else bad "StorageCluster $stc exists but NooBaa is not ready" "enable the Multicloud Object Gateway in $stc, or remove it so setup can create a standalone one"; fi
 gns=$(subns openshift-gitops-operator)
 if [ -n "$gns" ]; then
-  targets=$(oc get operatorgroups -n "$gns" -o jsonpath='{.items[0].spec.targetNamespaces}' 2>/dev/null)
+  targets=$(oc get operatorgroups -n "$gns" -o jsonpath='{.items[0].spec.targetNamespaces}' 2>/dev/null || true)
   [ -z "$targets" ] && ok "OpenShift GitOps watches all namespaces: the demo's own Argo CD instance can run in cve-demo-gitops" \
     || bad "OpenShift GitOps only watches $targets" "the demo creates its own Argo CD instance in cve-demo-gitops: the GitOps operator must watch all namespaces"
 fi
 if installed openshift-cert-manager-operator; then ok "cert-manager present: not used by the demo"; fi
-kc=$(oc get keycloak -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)
+kc=$(oc get keycloak -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null || true)
 for k in $kc; do [ "${k%%/*}" = "$KC_NS" ] || ok "Keycloak $k present: not used, the demo runs its own in $KC_NS"; done
 
 [ "$fail" = 0 ] && ok "preflight passed" || die "preflight failed: fix the items above and re-run"
