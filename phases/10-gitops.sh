@@ -123,9 +123,28 @@ for _ in $(seq 1 60); do
 done
 ok "Argo CD ready"
 
-render manifests/10-gitops/applications.yaml GITEA_INTERNAL_URL APP_IMAGE | oc apply -f - >/dev/null
+apps() { render manifests/10-gitops/applications.yaml GITEA_INTERNAL_URL APP_IMAGE | oc apply -f - >/dev/null; }
+app_changed() {  # the app in Gitea differs from demo/repos/app/app.py
+  [ "$(curl -s -u "$GITEA_USER:$GITEA_PASS" "$GITEA_URL/api/v1/repos/$GITEA_ORG/app/raw/app.py")" != "$(cat demo/repos/app/app.py)" ]
+}
+update_app() {  # push demo/repos/app/app.py on the baseline base image; the push starts a build
+  local token tmp current
+  token=$(oc get secret gitea-token -n cve-demo-ci -o jsonpath='{.data.token}' | base64 -d)
+  tmp=$(mktemp -d)
+  git clone -q "https://pipeline-bot:$token@${GITEA_URL#https://}/$GITEA_ORG/app.git" "$tmp/app"
+  cp demo/repos/app/app.py "$tmp/app/app.py"
+  current=$(grep -oE 'sha256:[a-f0-9]{64}' "$tmp/app/Containerfile" | head -1)
+  sed -i.bak "s#$current#$BASELINE_DIGEST#g" "$tmp/app/Containerfile" && rm -f "$tmp/app/Containerfile.bak"
+  git -C "$tmp/app" -c user.name="cve-demo setup" -c user.email="setup@cve-demo.local" commit -qam "Update the app" \
+    -m "Rebuilt on the baseline base image ${BASE_REPO}:${BASE_STREAM}@${BASELINE_DIGEST}."
+  git -C "$tmp/app" push -q origin HEAD:main
+  rm -rf "$tmp"
+  ok "pushed the updated app on the baseline base image"
+}
 baseline=$(oc get cm demo-baseline -n cve-demo-ci -o jsonpath='{.data.digest}' 2>/dev/null || true)
-if [ -z "$baseline" ]; then acs_policy inform; acs_signature inform; fi
+rebuild=0
+if [ -n "$baseline" ] && app_changed; then rebuild=1; fi
+if [ -z "$baseline" ] || [ "$rebuild" = 1 ]; then acs_policy inform; acs_signature inform; fi
 
 say "Gitea: gitops content, protected prod branch, webhooks"
 # the repository's own empty flag: newer Gitea lists the branches of an empty repository as null
@@ -166,10 +185,22 @@ hook() {  # hook <repo> <url>: exactly one push hook, pointing at <url>
 hook app "$EL"
 hook gitops "$ARGO"
 
-if [ -n "$baseline" ]; then
+if [ -n "$baseline" ] && [ "$rebuild" = 0 ]; then
+  apps
   ok "baseline already recorded (prod image $baseline): skipping the bootstrap build"
+elif [ "$rebuild" = 1 ]; then
+  apps
+  say "the app changed: rebuilding the baseline with it"
+  for n in $(gitea "$GITEA_URL/api/v1/repos/$GITEA_ORG/gitops/pulls?state=open" \
+      | python3 -c 'import sys,json; print(" ".join(str(p["number"]) for p in json.load(sys.stdin) if p["base"]["ref"]=="prod"))'); do
+    gitea -X PATCH "$GITEA_URL/api/v1/repos/$GITEA_ORG/gitops/pulls/$n" -d '{"state":"closed"}' -o /dev/null && ok "closed pull request #$n"
+  done
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  update_app
+  wait_build "$since"
 else
   acs_scanner_ready
+  apps   # only now: before the first build the overlays hold a placeholder digest
   say "bootstrap build on the baseline base image ${BASE_REPO}:${BASE_STREAM}@${BASELINE_DIGEST:0:19}…"
   open_prs=$(curl -s -u "$GITEA_USER:$GITEA_PASS" "$GITEA_URL/api/v1/repos/$GITEA_ORG/gitops/pulls?state=open" \
     | python3 -c 'import sys,json; print(sum(1 for p in json.load(sys.stdin) if p["base"]["ref"]=="prod"))')
@@ -186,6 +217,8 @@ else
     fi
     wait_build "$since"
   fi
+fi
+if [ -z "$baseline" ] || [ "$rebuild" = 1 ]; then
   approve_pr
   # wait for exactly the digest the merged pull request put on the prod branch
   want=$(curl -s -u "$GITEA_USER:$GITEA_PASS" "$GITEA_URL/api/v1/repos/$GITEA_ORG/gitops/raw/overlays/prod/kustomization.yaml?ref=prod" \
