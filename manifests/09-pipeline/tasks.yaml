@@ -48,8 +48,10 @@ spec:
         for v in sorted(bad, key=lambda v: v.get('cveSeverity')):
             print(f"  {v.get('cveSeverity'):9} {v.get('cveId'):18} {v.get('componentName')} "
                   f"{v.get('componentVersion')} -> fixed in {v.get('componentFixedVersion')}")
-        summary = (f"ACS at build: {len(bad)} fixable Important/Critical CVEs "
-                   f"({len(vulns)} known in total)")
+        # roxctl lists a CVE once per affected package: count unique CVE IDs, as the ACS UI does
+        fixable = len({v.get('cveId') for v in bad})
+        known = len({v.get('cveId') for v in vulns})
+        summary = f"ACS at build: {fixable} fixable Important/Critical CVEs ({known} known in total)"
         print(summary)
         open(sys.argv[1], 'w').write(summary)
         PY

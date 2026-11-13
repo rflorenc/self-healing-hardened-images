@@ -147,7 +147,7 @@ update_app() {  # push demo/repos/app/app.py on the baseline base image; the pus
 }
 baseline=$(oc get cm demo-baseline -n cve-demo-ci -o jsonpath='{.data.digest}' 2>/dev/null || true)
 rebuild=0
-if [ -n "$baseline" ] && app_changed; then rebuild=1; fi
+if [ -n "$baseline" ] && { app_changed || [ "${REBUILD_BASELINE:-0}" = 1 ]; }; then rebuild=1; fi
 if [ -z "$baseline" ] || [ "$rebuild" = 1 ]; then acs_policy inform; acs_signature inform; fi
 
 say "Gitea: gitops content, protected prod branch, webhooks"
@@ -194,7 +194,7 @@ if [ -n "$baseline" ] && [ "$rebuild" = 0 ]; then
   ok "baseline already recorded (prod image $baseline): skipping the bootstrap build"
 elif [ "$rebuild" = 1 ]; then
   apps
-  say "the app changed: rebuilding the baseline with it"
+  say "rebuilding the baseline: the app changed or REBUILD_BASELINE=1"
   for n in $(gitea "$GITEA_URL/api/v1/repos/$GITEA_ORG/gitops/pulls?state=open" \
       | python3 -c 'import sys,json; print(" ".join(str(p["number"]) for p in json.load(sys.stdin) if p["base"]["ref"]=="prod"))'); do
     gitea -X PATCH "$GITEA_URL/api/v1/repos/$GITEA_ORG/gitops/pulls/$n" -d '{"state":"closed"}' -o /dev/null && ok "closed pull request #$n"
