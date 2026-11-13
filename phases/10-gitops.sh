@@ -124,8 +124,9 @@ done
 ok "Argo CD ready"
 
 apps() { render manifests/10-gitops/applications.yaml GITEA_INTERNAL_URL APP_IMAGE | oc apply -f - >/dev/null; }
-app_changed() {  # the app in Gitea differs from demo/repos/app/app.py
-  [ "$(curl -s -u "$GITEA_USER:$GITEA_PASS" "$GITEA_URL/api/v1/repos/$GITEA_ORG/app/raw/app.py")" != "$(cat demo/repos/app/app.py)" ]
+app_sum() { shasum -a 256 demo/repos/app/app.py | cut -c1-12; }
+app_changed() {  # the baseline was built from another demo/repos/app/app.py
+  [ "$(oc get cm demo-baseline -n cve-demo-ci -o jsonpath='{.data.app}' 2>/dev/null)" != "$(app_sum)" ]
 }
 update_app() {  # push demo/repos/app/app.py on the baseline base image; the push starts a build
   local token tmp current
@@ -135,6 +136,9 @@ update_app() {  # push demo/repos/app/app.py on the baseline base image; the pus
   cp demo/repos/app/app.py "$tmp/app/app.py"
   current=$(grep -oE 'sha256:[a-f0-9]{64}' "$tmp/app/Containerfile" | head -1)
   sed -i.bak "s#$current#$BASELINE_DIGEST#g" "$tmp/app/Containerfile" && rm -f "$tmp/app/Containerfile.bak"
+  if git -C "$tmp/app" diff --quiet; then   # already pushed by an interrupted run: build it again
+    rm -rf "$tmp"; run_build main >/dev/null; ok "app already up to date in Gitea: rebuilding it"; return 0
+  fi
   git -C "$tmp/app" -c user.name="cve-demo setup" -c user.email="setup@cve-demo.local" commit -qam "Update the app" \
     -m "Rebuilt on the baseline base image ${BASE_REPO}:${BASE_STREAM}@${BASELINE_DIGEST}."
   git -C "$tmp/app" push -q origin HEAD:main
@@ -236,7 +240,7 @@ if [ -z "$baseline" ] || [ "$rebuild" = 1 ]; then
   cm=$(oc get deploy app -n cve-demo-prod -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}')
   summary=$(oc get cm "$cm" -n cve-demo-prod -o jsonpath='{.data.SCAN_SUMMARY}')
   oc create cm demo-baseline -n cve-demo-ci --from-literal=digest="${img#*@}" --from-literal=summary="$summary" \
-     --from-literal=base="$BASELINE_DIGEST" --dry-run=client -o yaml | oc apply -f - >/dev/null
+     --from-literal=base="$BASELINE_DIGEST" --from-literal=app="$(app_sum)" --dry-run=client -o yaml | oc apply -f - >/dev/null
   ok "baseline recorded: prod runs ${img#*@} ($summary)"
 fi
 
